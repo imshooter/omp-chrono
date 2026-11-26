@@ -78,7 +78,10 @@ void load(ICore& core, StringView name) {
 
 	std::optional<const time_zone*> zone = wanted.empty() ? machineZone() : locateZone(wanted);
 
-	if (!zone) {
+	if (!zone && wanted.empty()) {
+		core.logLn(LogLevel::Warning, "Chrono " COMPONENT_VERSION " cannot tell the time zone of this machine, so it keeps time in UTC.");
+		zone = locateZone("UTC");
+	} else if (!zone) {
 		core.logLn(LogLevel::Error, "Chrono " COMPONENT_VERSION " knows no time zone \"%s\", so it keeps time in UTC.", wanted.c_str());
 		zone = locateZone("UTC");
 	}
