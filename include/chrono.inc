@@ -159,8 +159,9 @@ native bool:TimeFormat(Timestamp:timestamp, const format[], output[], size = siz
 /**
  * @brief      Read a time from text.
  *
- * A time of day left out is midnight, and with no offset (`%z`) the text is
- * read as a time of the zone.
+ * It reads every specifier `TimeFormat` writes, and a width before one, as
+ * `%4Y`, is the most digits it takes. A time of day left out is midnight, and
+ * with no offset (`%z`) the text is read as a time of the zone.
  *
  * @param      string  The text.
  * @param      format  How it is written, as `%Y-%m-%d %H:%M`.

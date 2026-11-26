@@ -84,7 +84,23 @@ stock TestParse() {
     Check(TimeParse("02/06/2018 09:47:12 AM", "%d/%m/%Y %I:%M:%S %p", time) && time == TEST_TIME, "a twelve hour clock");
     Check(TimeParse("2018-06-02T09:47:12+01:00", "%FT%T%Ez", time) && time == TEST_TIME, "an offset with a colon");
     Check(!TimeParse("2018-02-30", "%Y-%m-%d", time), "a day the month does not have is refused");
-    Check(TimeParse("2018 153 09:47:12", "%Y %j %H:%M:%S", time) && time == TEST_TIME, "a day of the year, read by std::chrono::parse");
+    Check(TimeParse("2018 153 09:47:12", "%Y %j %H:%M:%S", time) && time == TEST_TIME, "a day of the year");
+    Check(TimeParse("2018-W22-6 09:47:12", "%G-W%V-%u %T", time) && time == TEST_TIME, "an ISO week and its day");
+    Check(TimeParse("2018 21 6 09:47:12", "%Y %U %w %T", time) && time == TEST_TIME, "a week from Sunday and its day");
+    Check(TimeParse("2018 22 Sat 09:47:12", "%Y %W %a %T", time) && time == TEST_TIME, "a week from Monday and its day");
+    Check(TimeParse("Sat, 02 Jun 2018 09:47:12", "%a, %d %b %Y %T", time) && time == TEST_TIME, "a weekday that matches the date");
+    Check(!TimeParse("Mon, 02 Jun 2018", "%a, %d %b %Y", time), "a weekday that does not match the date is refused");
+    Check(TimeParse("2018-06-02 09:47:12 BST", "%F %T %Z", time) && time == TEST_TIME, "the abbreviation of a zone is read and left out");
+    Check(TimeParse("20180602094712", "%4Y%2m%2d%2H%2M%2S", time) && time == TEST_TIME, "widths before the specifiers");
+    Check(!TimeParse("09:47", "%H:%M", time), "a time with no date is refused");
+    Check(!TimeParse("x", "%Q", time), "a specifier it does not know is refused");
+
+    new
+        text[32]
+    ;
+
+    TimeFormat(TEST_TIME, "%c", text);
+    Check(TimeParse(text, "%c", time) && time == TEST_TIME, "%c reads back what it writes");
 }
 
 stock TestDurations() {

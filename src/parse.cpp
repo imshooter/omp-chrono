@@ -4,34 +4,32 @@
 #include <cctype>
 #include <initializer_list>
 #include <iterator>
-#include <sstream>
 
 namespace chrono {
 
 namespace {
 
 /**
- * What `readFields` found in a text.
+ * What `readFields` found in a text. A weekday counts from `0` on Sunday.
  */
 struct Fields {
-	int64_t year = 0;
-	int64_t month = 0;
-	int64_t day = 0;
+	std::optional<int64_t> year;
+	std::optional<int64_t> century;
+	std::optional<int64_t> shortYear;
+	std::optional<int64_t> month;
+	std::optional<int64_t> day;
+	std::optional<int64_t> yearDay;
+	std::optional<int64_t> weekday;
+	std::optional<int64_t> sundayWeek;
+	std::optional<int64_t> mondayWeek;
+	std::optional<int64_t> isoYear;
+	std::optional<int64_t> isoWeek;
 	int64_t hour = 0;
 	int64_t minute = 0;
 	int64_t second = 0;
-	bool dated = false;
-	bool monthly = false;
-	bool daily = false;
 	bool twelve = false;
 	int meridiem = -1;
 	std::optional<seconds> offset;
-};
-
-enum class Reading {
-	Read,
-	Failed,
-	Unknown
 };
 
 /**
@@ -80,11 +78,11 @@ bool readName(std::string_view text, size_t& at, const char* const* names, int c
 }
 
 /**
- * Reads a text with the specifiers `TimeParse` sees most, or answers `Unknown`
- * at any other for `std::chrono::parse` to read the text instead. Spaces in the
- * format match any spaces, and text after the format is left alone, as there.
+ * Reads a text with the specifiers of `TimeFormat`. A width before a specifier,
+ * as `%4Y`, is the most digits it reads, spaces in the format match any spaces,
+ * and text after the format is left alone.
  */
-Reading readFields(std::string_view text, size_t& at, std::string_view format, Fields& fields) {
+bool readFields(std::string_view text, size_t& at, std::string_view format, Fields& fields) {
 	for (size_t i = 0; i != format.size(); ++i) {
 		if (std::isspace(uint8_t(format[i]))) {
 			while (at != text.size() && std::isspace(uint8_t(text[at]))) {
@@ -96,7 +94,7 @@ Reading readFields(std::string_view text, size_t& at, std::string_view format, F
 
 		if (format[i] != '%') {
 			if (at == text.size() || text[at] != format[i]) {
-				return Reading::Failed;
+				return false;
 			}
 
 			++at;
@@ -104,40 +102,69 @@ Reading readFields(std::string_view text, size_t& at, std::string_view format, F
 			continue;
 		}
 
-		if (++i == format.size()) {
-			return Reading::Unknown;
+		int width = 0;
+
+		while (++i != format.size() && std::isdigit(uint8_t(format[i]))) {
+			width = width * 10 + (format[i] - '0');
 		}
 
-		bool colon = (format[i] == 'E' || format[i] == 'O') && i + 1 != format.size() && format[i + 1] == 'z';
+		bool modified = i != format.size() && (format[i] == 'E' || format[i] == 'O');
 
-		if (colon) {
+		if (modified) {
 			++i;
 		}
 
-		int64_t value = 0;
-		Reading part = Reading::Read;
+		if (i == format.size()) {
+			return false;
+		}
+
+		auto number = [&](int digits, std::optional<int64_t>& out, int64_t low, int64_t high) {
+			int64_t value = 0;
+
+			if (!readNumber(text, at, width != 0 ? width : digits, value) || value < low || value > high) {
+				return false;
+			}
+
+			out = value;
+
+			return true;
+		};
+
+		auto clock = [&](int64_t& out, int64_t high) {
+			return readNumber(text, at, width != 0 ? width : 2, out) && out <= high;
+		};
+
+		std::optional<int64_t> value;
+		bool read = true;
 
 		switch (format[i]) {
 			case 'Y':
-				fields.dated = readNumber(text, at, 4, fields.year);
-				part = fields.dated ? Reading::Read : Reading::Failed;
+				read = number(4, fields.year, 0, 9999);
+				break;
+			case 'C':
+				read = number(2, fields.century, 0, 99);
 				break;
 			case 'y':
-				fields.dated = readNumber(text, at, 2, value);
-				fields.year = value < 69 ? 2000 + value : 1900 + value;
-				part = fields.dated ? Reading::Read : Reading::Failed;
+				read = number(2, fields.shortYear, 0, 99);
+				break;
+			case 'G':
+				read = number(4, fields.isoYear, 0, 9999);
+				break;
+			case 'g':
+				read = number(2, value, 0, 99);
+				fields.isoYear = value ? (*value < 69 ? 2000 + *value : 1900 + *value) : fields.isoYear;
 				break;
 			case 'm':
-				fields.monthly = readNumber(text, at, 2, fields.month);
-				part = fields.monthly ? Reading::Read : Reading::Failed;
+				read = number(2, fields.month, 1, 12);
 				break;
 			case 'b':
 			case 'B':
-			case 'h':
-				fields.monthly = readName(text, at, MonthNames, 12, value);
-				fields.month = value + 1;
-				part = fields.monthly ? Reading::Read : Reading::Failed;
+			case 'h': {
+				int64_t index = 0;
+				read = readName(text, at, MonthNames, 12, index);
+				fields.month = read ? index + 1 : fields.month;
 				break;
+			}
 			case 'e':
 				if (at != text.size() && text[at] == ' ') {
 					++at;
@@ -145,130 +172,197 @@ Reading readFields(std::string_view text, size_t& at, std::string_view format, F
 
 				[[fallthrough]];
 			case 'd':
-				fields.daily = readNumber(text, at, 2, fields.day);
-				part = fields.daily ? Reading::Read : Reading::Failed;
+				read = number(2, fields.day, 1, 31);
+				break;
+			case 'j':
+				read = number(3, fields.yearDay, 1, 366);
 				break;
 			case 'a':
-			case 'A':
-				part = readName(text, at, WeekdayNames, 7, value) ? Reading::Read : Reading::Failed;
+			case 'A': {
+				int64_t index = 0;
+				read = readName(text, at, WeekdayNames, 7, index);
+				fields.weekday = read ? index : fields.weekday;
+				break;
+			}
+			case 'u':
+				read = number(1, value, 1, 7);
+				fields.weekday = value ? *value % 7 : fields.weekday;
+				break;
+			case 'w':
+				read = number(1, fields.weekday, 0, 6);
+				break;
+			case 'U':
+				read = number(2, fields.sundayWeek, 0, 53);
+				break;
+			case 'W':
+				read = number(2, fields.mondayWeek, 0, 53);
+				break;
+			case 'V':
+				read = number(2, fields.isoWeek, 1, 53);
 				break;
 			case 'H':
-				part = readNumber(text, at, 2, fields.hour) ? Reading::Read : Reading::Failed;
+				read = clock(fields.hour, 23);
 				break;
 			case 'I':
 				fields.twelve = true;
-				part = readNumber(text, at, 2, fields.hour) ? Reading::Read : Reading::Failed;
+				read = clock(fields.hour, 12) && fields.hour != 0;
 				break;
 			case 'M':
-				part = readNumber(text, at, 2, fields.minute) ? Reading::Read : Reading::Failed;
+				read = clock(fields.minute, 59);
 				break;
 			case 'S':
-				part = readNumber(text, at, 2, fields.second) ? Reading::Read : Reading::Failed;
+				read = clock(fields.second, 59);
 				break;
 			case 'p':
-				if (text.size() - at >= 2 && std::tolower(uint8_t(text[at + 1])) == 'm' && (std::tolower(uint8_t(text[at])) == 'a' || std::tolower(uint8_t(text[at])) == 'p')) {
+				read = text.size() - at >= 2 && std::tolower(uint8_t(text[at + 1])) == 'm' && (std::tolower(uint8_t(text[at])) == 'a' || std::tolower(uint8_t(text[at])) == 'p');
+
+				if (read) {
 					fields.meridiem = std::tolower(uint8_t(text[at])) == 'p';
 					at += 2;
-				} else {
-					part = Reading::Failed;
 				}
 
 				break;
 			case 'z': {
 				int64_t hours = 0;
 				int64_t mins = 0;
+				read = at != text.size() && (text[at] == '+' || text[at] == '-');
 
-				if (at == text.size() || (text[at] != '+' && text[at] != '-')) {
-					part = Reading::Failed;
+				if (!read) {
 					break;
 				}
 
 				bool negative = text[at++] == '-';
+				read = readNumber(text, at, 2, hours);
 
-				if (!readNumber(text, at, 2, hours)) {
-					part = Reading::Failed;
-					break;
-				}
-
-				if (colon && at != text.size() && text[at] == ':') {
+				if (read && modified && at != text.size() && text[at] == ':') {
 					++at;
-
-					if (!readNumber(text, at, 2, mins)) {
-						part = Reading::Failed;
-						break;
-					}
-				} else if (!colon) {
+					read = readNumber(text, at, 2, mins);
+				} else if (read && !modified) {
 					readNumber(text, at, 2, mins);
 				}
 
 				fields.offset = seconds((negative ? -1 : 1) * (hours * 3600 + mins * 60));
 				break;
 			}
-			case 'F':
-				part = readFields(text, at, "%Y-%m-%d", fields);
+			case 'Z': {
+				size_t start = at;
+
+				while (at != text.size() && (std::isalnum(uint8_t(text[at])) || text[at] == '+' || text[at] == '-' || text[at] == '_' || text[at] == '/')) {
+					++at;
+				}
+
+				read = at != start;
 				break;
-			case 'T':
-				part = readFields(text, at, "%H:%M:%S", fields);
-				break;
-			case 'R':
-				part = readFields(text, at, "%H:%M", fields);
+			}
+			case 'c':
+				read = readFields(text, at, "%a %b %e %H:%M:%S %Y", fields);
 				break;
 			case 'D':
-				part = readFields(text, at, "%m/%d/%y", fields);
+			case 'x':
+				read = readFields(text, at, "%m/%d/%y", fields);
+				break;
+			case 'F':
+				read = readFields(text, at, "%Y-%m-%d", fields);
+				break;
+			case 'r':
+				read = readFields(text, at, "%I:%M:%S %p", fields);
+				break;
+			case 'R':
+				read = readFields(text, at, "%H:%M", fields);
+				break;
+			case 'T':
+			case 'X':
+				read = readFields(text, at, "%H:%M:%S", fields);
 				break;
 			case 'n':
-				if (at != text.size() && std::isspace(uint8_t(text[at]))) {
-					++at;
-				} else {
-					part = Reading::Failed;
-				}
-
+				read = at != text.size() && std::isspace(uint8_t(text[at]));
+				at += read ? 1 : 0;
 				break;
 			case 't':
-				if (at != text.size() && std::isspace(uint8_t(text[at]))) {
-					++at;
-				}
-
+				at += at != text.size() && std::isspace(uint8_t(text[at])) ? 1 : 0;
 				break;
 			case '%':
-				if (at != text.size() && text[at] == '%') {
-					++at;
-				} else {
-					part = Reading::Failed;
-				}
-
+				read = at != text.size() && text[at] == '%';
+				at += read ? 1 : 0;
 				break;
 			default:
-				return Reading::Unknown;
+				return false;
 		}
 
-		if (part != Reading::Read) {
-			return part;
+		if (!read) {
+			return false;
 		}
 	}
 
-	return Reading::Read;
+	return true;
 }
 
 /**
- * The time a text read by `readFields` names in a zone, or nothing for a date
- * left incomplete or out of the calendar.
+ * The day a text read by `readFields` names: by its month and day, its day of
+ * the year, its ISO week or its week from Sunday or Monday, in that order. A
+ * weekday read beside a date must be the weekday of that date.
  */
-std::optional<sys_seconds> timeOf(const Fields& fields, const time_zone* zone) {
-	if (!fields.dated || !fields.monthly || !fields.daily) {
+std::optional<local_days> dateOf(const Fields& fields) {
+	using std::chrono::year_month_day;
+
+	std::optional<int64_t> year = fields.year;
+
+	if (!year && fields.century) {
+		year = *fields.century * 100 + fields.shortYear.value_or(0);
+	} else if (!year && fields.shortYear) {
+		year = *fields.shortYear < 69 ? 2000 + *fields.shortYear : 1900 + *fields.shortYear;
+	}
+
+	auto first = [](int64_t of, unsigned month, unsigned day) {
+		return local_days(year_month_day(std::chrono::year(int(of)), std::chrono::month(month), std::chrono::day(day)));
+	};
+
+	auto weekdayOf = [](local_days day) {
+		return int64_t(std::chrono::weekday(day).c_encoding());
+	};
+
+	std::optional<local_days> date;
+
+	if (year && fields.month && fields.day) {
+		year_month_day ymd(std::chrono::year(int(*year)), std::chrono::month(unsigned(*fields.month)), std::chrono::day(unsigned(*fields.day)));
+
+		if (!ymd.ok()) {
+			return std::nullopt;
+		}
+
+		date = local_days(ymd);
+	} else if (year && fields.yearDay) {
+		date = first(*year, 1, 1) + days(*fields.yearDay - 1);
+	} else if (fields.isoYear && fields.isoWeek && fields.weekday) {
+		local_days january = first(*fields.isoYear, 1, 4);
+		local_days monday = january - days((weekdayOf(january) + 6) % 7);
+		date = monday + days((*fields.isoWeek - 1) * 7 + (*fields.weekday + 6) % 7);
+
+		if (year_month_day(*date + days(3 - (*fields.weekday + 6) % 7)).year() != std::chrono::year(int(*fields.isoYear))) {
+			return std::nullopt;
+		}
+	} else if (year && fields.weekday && (fields.sundayWeek || fields.mondayWeek)) {
+		local_days january = first(*year, 1, 1);
+		int64_t weekday = weekdayOf(january);
+
+		if (fields.sundayWeek) {
+			date = january + days((7 - weekday) % 7 + (*fields.sundayWeek - 1) * 7 + *fields.weekday);
+		} else {
+			date = january + days((8 - weekday) % 7 + (*fields.mondayWeek - 1) * 7 + (*fields.weekday + 6) % 7);
+		}
+	} else {
 		return std::nullopt;
 	}
 
-	int64_t hour = fields.twelve ? fields.hour % 12 + 12 * fields.meridiem : fields.hour;
-	std::chrono::year_month_day date(std::chrono::year(int(fields.year)), std::chrono::month(unsigned(fields.month)), std::chrono::day(unsigned(fields.day)));
-
-	if (!date.ok() || (fields.twelve && (fields.hour < 1 || fields.hour > 12)) || hour > 23 || fields.minute > 59 || fields.second > 59) {
+	if (year && !fields.isoWeek && year_month_day(*date).year() != std::chrono::year(int(*year))) {
 		return std::nullopt;
 	}
 
-	local_seconds local = local_days(date) + seconds(hour * 3600 + fields.minute * 60 + fields.second);
+	if (fields.weekday && weekdayOf(*date) != *fields.weekday) {
+		return std::nullopt;
+	}
 
-	return fields.offset ? sys_seconds(local.time_since_epoch()) - *fields.offset : toSys(zone, local);
+	return date;
 }
 
 }
@@ -276,30 +370,21 @@ std::optional<sys_seconds> timeOf(const Fields& fields, const time_zone* zone) {
 std::optional<sys_seconds> parseTime(std::string_view text, std::string_view format, const time_zone* zone) {
 	Fields fields;
 	size_t at = 0;
-	Reading reading = readFields(text, at, format, fields);
 
-	if (reading == Reading::Read && fields.twelve != (fields.meridiem != -1)) {
-		reading = Reading::Unknown;
-	}
-
-	if (reading == Reading::Read) {
-		return timeOf(fields, zone);
-	}
-
-	if (reading == Reading::Failed) {
+	if (!readFields(text, at, format, fields)) {
 		return std::nullopt;
 	}
 
-	std::istringstream input{ std::string(text) };
-	local_seconds local{};
-	std::chrono::minutes offset = std::chrono::minutes::min();
-	input >> std::chrono::parse(std::string(format), local, offset);
+	std::optional<local_days> date = dateOf(fields);
 
-	if (input.fail()) {
+	if (!date || fields.twelve != (fields.meridiem != -1)) {
 		return std::nullopt;
 	}
 
-	return offset != std::chrono::minutes::min() ? sys_seconds(local.time_since_epoch()) - offset : toSys(zone, local);
+	int64_t hour = fields.twelve ? fields.hour % 12 + 12 * fields.meridiem : fields.hour;
+	local_seconds local = *date + seconds(hour * 3600 + fields.minute * 60 + fields.second);
+
+	return fields.offset ? sys_seconds(local.time_since_epoch()) - *fields.offset : toSys(zone, local);
 }
 
 bool parseDuration(std::string_view text, int64_t& total) {
