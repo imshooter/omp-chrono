@@ -1,0 +1,140 @@
+name: Build chrono-omp for Linux x86
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: Linux x86 32-bit
+    runs-on: ubuntu-24.04
+    container: ubuntu:20.04
+
+    steps:
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y software-properties-common curl git ninja-build file binutils
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          apt-get update
+          apt-get install -y gcc-14 g++-14 g++-14-multilib
+          curl -sSL https://github.com/Kitware/CMake/releases/download/v3.30.5/cmake-3.30.5-linux-x86_64.tar.gz | tar -xz -C /opt
+          echo /opt/cmake-3.30.5-linux-x86_64/bin >> "$GITHUB_PATH"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc-14 \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_C_FLAGS=-m32 \
+            -DCMAKE_CXX_FLAGS=-m32 \
+            -DCMAKE_SHARED_LINKER_FLAGS=-m32
+
+      - name: Build Chrono
+        run: cmake --build build --target Chrono --parallel 2
+
+      - name: Check the library
+        run: |
+          file build/Chrono.so
+          echo "Newest glibc it needs: $(objdump -T build/Chrono.so | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+          if objdump -T build/Chrono.so | grep -q 'GLIBCXX\|CXXABI'; then
+            echo "ERROR: Chrono.so needs the libstdc++ of the system."
+            exit 1
+          fi
+
+      - name: Prepare the Linux build
+        run: |
+          mkdir -p dist/components dist/qawno/include
+          cp build/Chrono.so dist/components/
+          cp include/chrono.inc dist/qawno/include/
+          cp LICENSE dist/LICENSE.txt
+          cp LICENSE-pawn-chrono dist/LICENSE-pawn-chrono.txt
+
+      - name: Upload the Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Chrono-linux-x86
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  test-linux:
+    name: Test on ${{ matrix.system }}
+    needs: build-linux
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.system }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        system:
+          - ubuntu:20.04
+          - debian:12
+          - ubuntu:24.04
+
+    steps:
+      - name: Install the libraries of the server
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          dpkg --add-architecture i386
+          apt-get update
+          apt-get install -y curl ca-certificates tzdata libc6:i386 libatomic1:i386 libstdc++6:i386
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download the Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: Chrono-linux-x86
+          path: dist
+
+      - name: Download open.mp and the Pawn compiler
+        run: |
+          curl -sSL -o omp.tar.gz https://github.com/openmultiplayer/open.mp/releases/download/v1.6.7.3218/open.mp-linux-x86.tar.gz
+          mkdir omp
+          tar -xzf omp.tar.gz -C omp
+          curl -sSL -o pawnc.tar.gz https://github.com/openmultiplayer/compiler/releases/download/v3.10.11/pawnc-3.10.11-linux.tar.gz
+          mkdir pawnc
+          tar -xzf pawnc.tar.gz -C pawnc
+
+      - name: Run the tests
+        run: |
+          server=$(dirname "$(find omp -name omp-server -type f | head -1)")
+          pawncc=$(find pawnc -name pawncc -type f | head -1)
+          includes=$(dirname "$(find omp -name open.mp.inc | head -1)")
+          export LD_LIBRARY_PATH="$(dirname "$(find pawnc -name 'libpawnc.so' | head -1)")"
+          mkdir -p "$server/gamemodes"
+          cp dist/components/Chrono.so "$server/components/"
+          "$pawncc" tests/chronotest.pwn -iinclude "-i$includes" '-;+' '-(+' -d2 "-o$server/gamemodes/chronotest.amx"
+          cat > "$server/config.json" <<EOF
+          {
+              "announce": false,
+              "enable_query": false,
+              "max_players": 2,
+              "name": "chrono-omp test",
+              "network": { "bind": "127.0.0.1", "port": 7777 },
+              "pawn": { "legacy_plugins": [], "main_scripts": ["chronotest"], "side_scripts": [] },
+              "rcon": { "enable": false, "password": "chrono-omp-test" },
+              "chrono": { "time_zone": "Europe/London" },
+              "logging": { "use_prefix": false, "use_timestamp": false }
+          }
+          EOF
+          cd "$server"
+          chmod +x omp-server
+          timeout 60 ./omp-server > output.txt 2>&1 || true
+          grep -a "Chrono\|chronotest\|rror" output.txt
+          grep -q "\[chronotest\] DONE [0-9]* passed, 0 failed" output.txt
