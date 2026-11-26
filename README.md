@@ -15,12 +15,12 @@ An open.mp component for dates and times: timestamps and durations with a tag fo
 
 ## Installation
 
-1. Download the latest release from [Releases](https://github.com/imshooter/chrono-omp/releases).
-2. Place `Chrono.dll` in the `components` folder of the server.
+1. Download the latest release from [Releases](https://github.com/imshooter/chrono-omp/releases), the `windows-x86` or the `linux-x86` zip.
+2. Place `Chrono.dll` or `Chrono.so` in the `components` folder of the server.
 3. Place `chrono.inc` in the include folder of the compiler.
 4. Remove `chrono` from `pawn.legacy_plugins`, as both give the same natives.
 
-No plugin is needed. Tested with open.mp 1.6.7 on Windows. The time zones come from Windows 10 version 1903 or later. Only a Windows build is available for now.
+No plugin is needed. Tested with open.mp 1.6.7 on Windows, Ubuntu 20.04, Debian 12 and Ubuntu 24.04. The time zones come from Windows 10 version 1903 or later, and on Linux from the `tzdata` of the system. The Linux build needs glibc 2.25 or later.
 
 ## Configuration
 
@@ -81,18 +81,27 @@ Microseconds per call, measured on one computer with pawn-chrono and chrono-omp 
 
 ## Tests
 
-- [`tests/chronotest.pwn`](tests/chronotest.pwn): writing and reading times, durations, the calendar and time zones, on a server in `Europe/London`.
+- [`tests/chronotest.pwn`](tests/chronotest.pwn): writing and reading times, durations, the calendar and time zones, on a server in `Europe/London`. GitHub Actions runs it on open.mp for Linux at every push.
 
 ## Building
 
-Windows with Visual Studio 2022 or its Build Tools, and CMake 3.19 or later. CMake fetches the open.mp SDK and the Pawn headers.
+CMake 3.19 or later fetches the open.mp SDK and the Pawn headers. The server is 32 bit, so the component must be too.
+
+On Windows, with Visual Studio 2022 or its Build Tools:
 
 ```
 cmake -S . -B build -A Win32
 cmake --build build --config Release
 ```
 
-The component is written to `build/Release/Chrono.dll`. The server is 32 bit, so the component must be too.
+On Linux, with GCC 13 or later and its 32 bit libraries:
+
+```
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32 -DCMAKE_SHARED_LINKER_FLAGS=-m32
+cmake --build build
+```
+
+The component is written to `build/Release/Chrono.dll` or `build/Chrono.so`. The Linux release is built on Ubuntu 20.04, as [`.github/workflows/main.yml`](.github/workflows/main.yml) does.
 
 ## Thanks to
 
