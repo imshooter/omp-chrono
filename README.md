@@ -17,7 +17,7 @@ An open.mp component for dates and times: timestamps and durations with a tag fo
 
 ## Installation
 
-1. Download the latest release from [Releases](https://github.com/imshooter/chrono-omp/releases), the `windows-x86` or the `linux-x86` zip.
+1. Download the latest release from [Releases](https://github.com/imshooter/omp-chrono/releases), the `windows-x86` or the `linux-x86` zip.
 2. Place `Chrono.dll` or `Chrono.so` in the `components` folder of the server.
 3. Place `chrono.inc` in the include folder of the compiler.
 4. Remove `chrono` from `pawn.legacy_plugins`, as both give the same natives.
@@ -71,9 +71,9 @@ Scripts compile as they are, and scripts built against pawn-chrono run on the co
 
 ## Performance
 
-Microseconds per call, measured on one computer with pawn-chrono and chrono-omp on the same server and script:
+Microseconds per call, measured on one computer with pawn-chrono and omp-chrono on the same server and script:
 
-| Call | pawn-chrono | chrono-omp |
+| Call | pawn-chrono | omp-chrono |
 | --- | --- | --- |
 | `Now` | 0.03 | 0.03 |
 | `TimeFormat` | 3.4 | 0.33 to 0.46 |
