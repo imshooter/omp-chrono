@@ -1,4 +1,4 @@
-name: Build chrono-omp for Linux x86
+name: Build omp-chrono for Linux x86
 
 on:
   push:
@@ -125,10 +125,10 @@ jobs:
               "announce": false,
               "enable_query": false,
               "max_players": 2,
-              "name": "chrono-omp test",
+              "name": "omp-chrono test",
               "network": { "bind": "127.0.0.1", "port": 7777 },
               "pawn": { "legacy_plugins": [], "main_scripts": ["chronotest"], "side_scripts": [] },
-              "rcon": { "enable": false, "password": "chrono-omp-test" },
+              "rcon": { "enable": false, "password": "omp-chrono-test" },
               "chrono": { "time_zone": "Europe/London" },
               "logging": { "use_prefix": false, "use_timestamp": false }
           }
